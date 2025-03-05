@@ -1,0 +1,61 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Deploy to DigitalOcean via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -ex  # Debugging ke liye
+            cd ${{ secrets.PROD_PROJECT_PATH }}
+
+            # Fetch all branches
+            git fetch --all
+
+            # Find the latest develop-dev-* branch
+            BRANCH=$(git for-each-ref --sort=-committerdate refs/remotes/origin/ | awk -F'/' '/develop-dev-/ {print $NF; exit}')
+            echo "Deploying branch: $BRANCH"
+
+            # Checkout and pull latest changes
+            git checkout $BRANCH
+            git pull origin $BRANCH
+
+            # Load NVM
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            # Use Node.js 20
+            nvm install 20
+            nvm use 20
+            node -v  # Check Node version
+
+            # Install dependencies
+            npm install
+
+            # Ensure PM2 is installed
+            if ! which pm2 > /dev/null; then
+              npm install -g pm2
+            fi
+
+            # Restart application with PM2
+            pm2 restart ecosystem.config.js --only cap-connect-prod
